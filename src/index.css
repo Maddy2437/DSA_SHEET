@@ -1,0 +1,51 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #f3f5fa;
+  --surface: #ffffff;
+  --surface-2: #eceff8;
+  --line: #d9deec;
+  --text: #161b2f;
+  --muted: #5b6580;
+  --accent: #4b5bd6;
+  --accent-fg: #ffffff;
+  --accent-soft: #e4e7ff;
+  color-scheme: light;
+}
+.dark {
+  --bg: #0d1221;
+  --surface: #141b30;
+  --surface-2: #1b2440;
+  --line: #27314f;
+  --text: #e6e9f5;
+  --muted: #98a2be;
+  --accent: #8f9bff;
+  --accent-fg: #0d1221;
+  --accent-soft: #232c58;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface2: var(--surface-2);
+  --color-line: var(--line);
+  --color-fg: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+html, body { background: var(--bg); color: var(--text); font-family: var(--font-sans); }
+body { font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+textarea, select, input { font: inherit; }
+/* the app draws its own clear button; hide the browser's duplicate */
+input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
