@@ -1,5 +1,6 @@
-import type { ProblemProgress, ProgressMap, Status } from '../types';
-import { DATE_RE } from './dates';
+import type { ProblemProgress, ProgressMap, RevisionResult, Status } from '../types';
+import { DATE_RE, dayNumber } from './dates';
+import { applyRevision, coerceRevision, newRevisionState } from './revision';
 import { readStorage, removeStorage, STORAGE_KEYS, writeStorage } from './storage';
 
 export const APP_ID = 'madhavs-dsa-sheet';
@@ -31,7 +32,8 @@ export function isDefaultEntry(e: ProblemProgress): boolean {
     !e.needsRevision &&
     e.revisionCount === 0 &&
     e.lastRevised === null &&
-    e.solvedDate === null
+    e.solvedDate === null &&
+    e.revision === undefined
   );
 }
 
@@ -50,12 +52,17 @@ function update(map: ProgressMap, id: string, fn: (e: ProblemProgress) => Proble
 
 export const ops = {
   // solvedDate is set the first time a problem becomes Solved and is never erased afterwards.
+  // That same first solve is what puts the problem into the Revision Hub schedule (revision 1 is due tomorrow).
   setStatus: (map: ProgressMap, id: string, status: Status, today: string) =>
-    update(map, id, (e) => ({
-      ...e,
-      status,
-      solvedDate: status === 'solved' && !e.solvedDate ? today : e.solvedDate,
-    })),
+    update(map, id, (e) => {
+      const firstSolve = status === 'solved' && !e.solvedDate;
+      return {
+        ...e,
+        status,
+        solvedDate: firstSolve ? today : e.solvedDate,
+        ...(firstSolve && !e.revision ? { revision: newRevisionState(today) } : {}),
+      };
+    }),
   toggleImportant: (map: ProgressMap, id: string) => update(map, id, (e) => ({ ...e, important: !e.important })),
   setNotes: (map: ProgressMap, id: string, notes: string) => update(map, id, (e) => ({ ...e, notes })),
   // Revision is an independent flag: it never touches `status` or `solvedDate`.
@@ -68,6 +75,23 @@ export const ops = {
       revisionCount: e.revisionCount + 1,
       lastRevised: today,
     })),
+
+  // ----- Revision Hub -----
+  // Puts an already-Solved problem that is not in the schedule yet (e.g. solved earlier today, before the hub
+  // existed) into it. Problems solved before the hub are never added automatically.
+  enrollRevision: (map: ProgressMap, id: string, today: string) =>
+    update(map, id, (e) =>
+      e.revision || e.status !== 'solved' ? e : { ...e, revision: newRevisionState(e.solvedDate ?? today) },
+    ),
+  // Records how a scheduled revision went. It reuses the existing revisionCount / lastRevised fields (so the rest of
+  // the app stays in sync) and never touches status, solvedDate or the manual needsRevision flag.
+  // Ignored unless the revision is actually due, so a double click cannot record two attempts.
+  recordRevision: (map: ProgressMap, id: string, result: RevisionResult, today: string) =>
+    update(map, id, (e) => {
+      const r = e.revision;
+      if (!r || r.due === null || dayNumber(r.due) > dayNumber(today)) return e;
+      return { ...e, revision: applyRevision(r, result, today), revisionCount: e.revisionCount + 1, lastRevised: today };
+    }),
 };
 
 // ---------- Persistence ----------
@@ -78,6 +102,7 @@ const isRecord = (x: unknown): x is Record<string, unknown> =>
 function coerceEntry(x: unknown): ProblemProgress {
   const o = isRecord(x) ? x : {};
   const d = defaultEntry();
+  const revision = coerceRevision(o.revision);
   return {
     status: STATUSES.includes(o.status as Status) ? (o.status as Status) : d.status,
     notes: typeof o.notes === 'string' ? o.notes : d.notes,
@@ -89,6 +114,8 @@ function coerceEntry(x: unknown): ProblemProgress {
         : 0,
     lastRevised: typeof o.lastRevised === 'string' && DATE_RE.test(o.lastRevised) ? o.lastRevised : null,
     solvedDate: typeof o.solvedDate === 'string' && DATE_RE.test(o.solvedDate) ? o.solvedDate : null,
+    // Older saves have no `revision`; the key is only added when there is valid revision data.
+    ...(revision ? { revision } : {}),
   };
 }
 
@@ -179,6 +206,9 @@ export function parseImport(text: string): ImportResult {
       if (v !== null && !(typeof v === 'string' && DATE_RE.test(v)))
         return { ok: false, error: `Entry "${id}" has an invalid ${f}.` };
     }
+    // Optional: exports made before the Revision Hub have no `revision`.
+    if (e.revision != null && coerceRevision(e.revision) === null)
+      return { ok: false, error: `Entry "${id}" has invalid revision data.` };
     const entry = coerceEntry(e);
     if (!isDefaultEntry(entry)) progress[id] = entry;
   }

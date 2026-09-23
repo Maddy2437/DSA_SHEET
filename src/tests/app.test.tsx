@@ -27,7 +27,7 @@ describe('navigation', () => {
     const user = userEvent.setup();
     renderApp('/');
     expect(h1('Dashboard')).toBeInTheDocument();
-    for (const [link, heading] of [['Roadmap', 'Roadmap'], ['Important', 'Important'], ['Revision', 'Revision'], ['Settings', 'Settings'], ['Dashboard', 'Dashboard']]) {
+    for (const [link, heading] of [['Roadmap', 'Roadmap'], ['Important', 'Important'], ['Revision', 'Revision Hub'], ['Settings', 'Settings'], ['Dashboard', 'Dashboard']]) {
       await user.click(mainNav().getByRole('link', { name: new RegExp(`^${link}`) }));
       expect(h1(heading)).toBeInTheDocument();
     }

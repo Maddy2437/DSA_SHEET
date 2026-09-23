@@ -17,6 +17,13 @@ export function dayNumber(key: string): number {
   return Math.round(Date.UTC(y, m - 1, d) / 86_400_000);
 }
 
+// Calendar-day arithmetic on "YYYY-MM-DD" keys. UTC math, so DST and month/year lengths can never skew it.
+export function addDays(key: string, n: number): string {
+  const [y, m, d] = key.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + n));
+  return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
+}
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export function formatDate(key: string | null): string {

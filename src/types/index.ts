@@ -89,6 +89,21 @@ export interface Dataset {
 // ---------- Personal tracking state (stored separately, keyed by problem id) ----------
 export type Status = 'not_started' | 'in_progress' | 'solved';
 
+// ---------- Revision Hub (spaced revision) ----------
+export type RevisionResult = 'forgot' | 'hint' | 'solved' | 'easy';
+
+export interface RevisionAttempt {
+  revision: number; // which revision (1..5) this attempt was for; a repeat or confirmation attempt reuses the same number
+  date: string; // YYYY-MM-DD (local date) the revision was done
+  result: RevisionResult;
+}
+
+export interface RevisionState {
+  stage: number; // revisions completed successfully so far (0..5)
+  due: string | null; // YYYY-MM-DD the next revision is due; null once the problem is Mastered
+  attempts: RevisionAttempt[]; // every revision attempt, oldest first
+}
+
 export interface ProblemProgress {
   status: Status;
   notes: string;
@@ -97,6 +112,9 @@ export interface ProblemProgress {
   revisionCount: number;
   lastRevised: string | null; // YYYY-MM-DD (local date)
   solvedDate: string | null; // YYYY-MM-DD (local date), set the first time the problem becomes Solved
+  // Optional so entries saved before the Revision Hub existed stay valid. Present only for problems that entered
+  // the revision schedule (first solved after the hub shipped, or added to it by hand from "Solved today").
+  revision?: RevisionState;
 }
 
 export type ProgressMap = Record<string, ProblemProgress>;

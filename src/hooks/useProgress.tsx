@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { ProgressMap, Status } from '../types';
+import type { ProgressMap, RevisionResult, Status } from '../types';
 import { todayKey } from '../utils/dates';
 import { clearProgressStorage, loadProgress, ops, saveProgress } from '../utils/progress';
 import { STORAGE_KEYS } from '../utils/storage';
@@ -10,6 +10,10 @@ export interface ProgressActions {
   setNotes: (id: string, notes: string) => void;
   toggleNeedsRevision: (id: string) => void;
   markRevised: (id: string) => void;
+  /** Revision Hub: records how a due revision went and schedules the next one. */
+  recordRevision: (id: string, result: RevisionResult) => void;
+  /** Revision Hub: puts an already-Solved problem into the revision schedule. */
+  enrollRevision: (id: string) => void;
   /** Replaces ALL personal progress (used by import). Never touches the dataset. */
   replaceAll: (map: ProgressMap) => void;
   /** Deletes ALL personal progress. Never touches the dataset. */
@@ -43,6 +47,8 @@ export function ProgressProvider({ children }: { children: ReactNode }) {
       setNotes: (id, notes) => setProgress((m) => ops.setNotes(m, id, notes)),
       toggleNeedsRevision: (id) => setProgress((m) => ops.toggleNeedsRevision(m, id)),
       markRevised: (id) => setProgress((m) => ops.markRevised(m, id, todayKey())),
+      recordRevision: (id, result) => setProgress((m) => ops.recordRevision(m, id, result, todayKey())),
+      enrollRevision: (id) => setProgress((m) => ops.enrollRevision(m, id, todayKey())),
       replaceAll: (map) => setProgress(map),
       resetAll: () => {
         clearProgressStorage();

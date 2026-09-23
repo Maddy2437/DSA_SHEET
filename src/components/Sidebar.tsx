@@ -1,9 +1,12 @@
 import { LayoutDashboard, ListChecks, RotateCcw, Route as RouteIcon, Settings as SettingsIcon, Star, X } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useFilters } from '../hooks/useFilters';
+import { useProgress } from '../hooks/useProgress';
 import { useStats } from '../hooks/useStats';
+import { useToday } from '../hooks/useToday';
 import { dataset } from '../utils/dataset';
+import { buildRevisionHub } from '../utils/revision';
 
 function NavItem({ to, icon, label, count, active, onClick }: { to: string; icon: ReactNode; label: string; count?: number; active: boolean; onClick?: () => void }) {
   return (
@@ -27,6 +30,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const navigate = useNavigate();
   const { filters, setFilters, clearFilters } = useFilters();
   const stats = useStats();
+  const progress = useProgress();
+  const today = useToday();
+  // Problems that need action in the Revision Hub: due today, overdue, or flagged by hand.
+  const revisionTodo = useMemo(() => buildRevisionHub(dataset, progress, today).todo, [progress, today]);
   const ic = 'size-4';
 
   const goTopic = (stepNo: number) => {
@@ -68,7 +75,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             }}
           />
           <NavItem to="/important" icon={<Star aria-hidden className={ic} />} label="Important" count={stats.important} active={pathname === '/important'} onClick={onClose} />
-          <NavItem to="/revision" icon={<RotateCcw aria-hidden className={ic} />} label="Revision" count={stats.needsRevision} active={pathname === '/revision'} onClick={onClose} />
+          <NavItem to="/revision" icon={<RotateCcw aria-hidden className={ic} />} label="Revision Hub" count={revisionTodo} active={pathname === '/revision'} onClick={onClose} />
           <NavItem to="/settings" icon={<SettingsIcon aria-hidden className={ic} />} label="Settings" active={pathname === '/settings'} onClick={onClose} />
         </nav>
 
