@@ -94,7 +94,7 @@ describe('adaptive state machine', () => {
     const s = applyRevision(at3, 'forgot', '2026-10-01');
     expect(s.stage).toBe(2);
     expect(s.due).toBe('2026-10-02');
-    expect(s.attempts.at(-1)).toEqual({ revision: 3, date: '2026-10-01', result: 'forgot' });
+    expect(s.attempts.at(-1)).toEqual({ revision: 3, date: '2026-10-01', result: 'forgot', scheduled: '2026-09-30' }); // it was one day late
   });
 
   it('Needed hint repeats the current revision in 3 days', () => {
@@ -302,7 +302,7 @@ describe('Revision Hub page', () => {
     expect(within(scheduled).getByText('Due tomorrow')).toBeInTheDocument();
   });
 
-  it('shows the actual problem names under Revise today and Overdue, and recording a result reschedules it', async () => {
+  it('shows the actual problem names under Revise today and Overdue; results are recorded in the Revision Session, not on the cards', async () => {
     const user = userEvent.setup();
     seedProgress({
       [P.id]: entry({ status: 'solved', solvedDate: addDaysLocal(TODAY, -3), revision: { stage: 1, due: TODAY, attempts: [att(1, 'solved', addDaysLocal(TODAY, -2))] }, lastRevised: addDaysLocal(TODAY, -2), revisionCount: 1 }),
@@ -320,19 +320,21 @@ describe('Revision Hub page', () => {
     expect(screen.getByTestId('hub-due')).toHaveTextContent('1');
     expect(screen.getByTestId('hub-overdue')).toHaveTextContent('1');
 
-    await user.click(due.getByRole('button', { name: 'Start Revision' }));
-    await user.click(within(due.getByRole('group', { name: /Record revision/ })).getByRole('button', { name: /^Needed hint/ }));
+    // The cards only show status; there is no way to record a result from them.
+    for (const name of [/^Start Revision$/, /^Revise Now$/, /^Forgot/, /^Needed hint/, /^Solved\b/]) expect(screen.queryByRole('button', { name })).toBeNull();
+    expect(screen.queryByRole('group', { name: /Record revision/ })).toBeNull();
 
+    // A real revision goes through the session: overdue first, then due today.
+    await user.click(screen.getByRole('button', { name: 'Start Revision Session' }));
+    await user.click(screen.getByRole('button', { name: /^Solved easily/ })); // Q (overdue)
+    await user.click(screen.getByRole('button', { name: /^Needed hint/ })); // P (due today)
+    expect(storedProgress()[Q.id].revision).toMatchObject({ stage: 3, due: addDaysLocal(TODAY, 7) });
     const saved = storedProgress()[P.id];
     expect(saved.revision).toMatchObject({ stage: 1, due: addDaysLocal(TODAY, 3) }); // same stage again, in 3 days
     expect(saved.revision!.attempts.at(-1)).toMatchObject({ revision: 2, date: TODAY, result: 'hint' });
     expect(saved).toMatchObject({ revisionCount: 2, lastRevised: TODAY, status: 'solved' });
+    await user.click(screen.getByRole('button', { name: 'Back to Revision Hub' }));
     expect(within(screen.getByRole('region', { name: 'Revise today' })).queryByRole('heading', { name: P.title })).toBeNull();
-    expect(within(screen.getByRole('region', { name: 'Overdue' })).getByRole('heading', { name: Q.title })).toBeInTheDocument(); // still there
-
-    await user.click(within(screen.getByRole('region', { name: 'Overdue' })).getByRole('button', { name: 'Revise Now' }));
-    await user.click(within(screen.getByRole('region', { name: 'Overdue' })).getByRole('button', { name: /^Solved easily/ }));
-    expect(storedProgress()[Q.id].revision).toMatchObject({ stage: 3, due: addDaysLocal(TODAY, 7) });
     expect(within(screen.getByRole('region', { name: 'Overdue' })).queryByRole('heading', { name: Q.title })).toBeNull();
   });
 

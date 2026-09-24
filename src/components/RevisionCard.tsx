@@ -1,6 +1,5 @@
-import { Check, ChevronRight, History, Lightbulb, Play, Sparkles, Trophy, X } from 'lucide-react';
-import { memo, useMemo, useState, type ReactNode } from 'react';
-import { useProgressActions } from '../hooks/useProgress';
+import { ChevronRight, History, Trophy } from 'lucide-react';
+import { memo, useMemo } from 'react';
 import type { RevisionResult } from '../types';
 import { shortTitle } from '../utils/dataset';
 import { formatDate } from '../utils/dates';
@@ -8,12 +7,9 @@ import { resolveResources } from '../utils/resources';
 import {
   countAttempts,
   currentRevision,
-  daysOverdue,
   daysUntilDue,
   REVISION_STAGES,
-  RESULT_HELP,
   RESULT_LABEL,
-  RESULTS,
   revisionHistory,
   type RevisionItem,
 } from '../utils/revision';
@@ -30,13 +26,6 @@ const EDGE: Record<RevisionItem['phase'], string> = {
   mastered: 'border-l-emerald-500',
 };
 
-const RESULT_STYLE: Record<RevisionResult, { icon: ReactNode; cls: string }> = {
-  forgot: { icon: <X aria-hidden className="size-4" />, cls: 'border-rose-500/50 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300' },
-  hint: { icon: <Lightbulb aria-hidden className="size-4" />, cls: 'border-amber-500/50 text-amber-700 hover:bg-amber-500/10 dark:text-amber-300' },
-  solved: { icon: <Check aria-hidden className="size-4" />, cls: 'border-emerald-500/50 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300' },
-  easy: { icon: <Sparkles aria-hidden className="size-4" />, cls: 'border-emerald-500 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-300' },
-};
-
 const RESULT_TEXT: Record<RevisionResult, string> = {
   forgot: 'text-rose-600 dark:text-rose-300',
   hint: 'text-amber-700 dark:text-amber-300',
@@ -51,10 +40,10 @@ interface Props {
   showPattern?: boolean;
 }
 
+// Shows a problem's place in the revision schedule. Results are NOT recorded here: a real revision always happens in
+// the Revision Session, so there is a single way to record one.
 export const RevisionCard = memo(function RevisionCard({ item, today, showPattern = false }: Props) {
-  const actions = useProgressActions();
   const { problem, entry, state, phase, weak } = item;
-  const [started, setStarted] = useState(false);
   const resources = useMemo(() => resolveResources(problem), [problem]);
   const history = useMemo(() => revisionHistory(state), [state]);
   const counts = countAttempts(state);
@@ -68,16 +57,19 @@ export const RevisionCard = memo(function RevisionCard({ item, today, showPatter
         ? `Confirmation revision (${REVISION_STAGES}/${REVISION_STAGES} completed)`
         : `Revision ${currentRevision(state)}/${REVISION_STAGES}`;
 
-  const dueText =
-    phase === 'overdue'
-      ? `Overdue by ${plural(daysOverdue(state, today), 'day')}`
-      : phase === 'due'
-        ? 'Due today'
-        : phase === 'upcoming'
-          ? daysUntilDue(state, today) === 1
-            ? 'Due tomorrow'
-            : `Due in ${plural(daysUntilDue(state, today), 'day')}`
-          : 'Mastered';
+  const dueText = item.onHold
+    ? 'On hold (revision paused)'
+    : item.frozen
+      ? 'Overdue — Frozen during pause'
+      : phase === 'overdue'
+        ? `Overdue by ${plural(item.overdueDays, 'day')}`
+        : phase === 'due'
+          ? 'Due today'
+          : phase === 'upcoming'
+            ? daysUntilDue(state, today) === 1
+              ? 'Due tomorrow'
+              : `Due in ${plural(daysUntilDue(state, today), 'day')}`
+            : 'Mastered';
 
   const badge =
     phase === 'overdue'
@@ -99,6 +91,9 @@ export const RevisionCard = memo(function RevisionCard({ item, today, showPatter
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h3 className="text-sm font-semibold leading-snug sm:text-base">{problem.title}</h3>
             <DifficultyBadge difficulty={problem.difficulty} />
+            {item.solvedDuringPause && (
+              <span className="rounded-full border border-line px-2 py-0.5 text-xs text-muted">Solved during pause</span>
+            )}
             {weak && (
               <span className="rounded-full border border-rose-500/40 bg-rose-500/10 px-2 py-0.5 text-xs font-medium text-rose-600 dark:text-rose-300">
                 Weak
@@ -138,43 +133,17 @@ export const RevisionCard = memo(function RevisionCard({ item, today, showPatter
         )}
       </div>
 
-      {actionable && (
-        <div className="mt-3">
-          <button
-            type="button"
-            aria-expanded={started}
-            onClick={() => setStarted((s) => !s)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:opacity-90"
-          >
-            <Play aria-hidden className="size-3.5" /> {phase === 'overdue' ? 'Revise Now' : 'Start Revision'}
-          </button>
-        </div>
+      {item.frozen && (
+        <p className="mt-2 text-xs text-muted" data-testid="frozen-note">
+          Overdue for {plural(item.overdueDays, 'day')} before the pause. It keeps its original due date and the paused
+          days are not counted.
+        </p>
       )}
 
-      {actionable && started && (
-        <div role="group" aria-label={`Record revision for ${problem.title}`} className="mt-3 space-y-3 rounded-lg border border-line bg-bg p-3">
-          <div className="space-y-1.5">
-            <p className="text-xs text-muted">Solve it again from memory first. Open it here if you need the problem statement:</p>
-            <ResourceButtons resources={resources} />
-          </div>
-          <div>
-            <p className="mb-1.5 text-xs font-medium">How did it go?</p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {RESULTS.map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  onClick={() => actions.recordRevision(problem.id, r)}
-                  className={`flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left ${RESULT_STYLE[r].cls}`}
-                >
-                  <span className="inline-flex items-center gap-1.5 text-sm font-medium">
-                    {RESULT_STYLE[r].icon} {RESULT_LABEL[r]}
-                  </span>
-                  <span className="text-xs text-muted">{RESULT_HELP[r]}</span>
-                </button>
-              ))}
-            </div>
-          </div>
+      {actionable && (
+        <div className="mt-3 space-y-1.5">
+          <ResourceButtons resources={resources} />
+          {!item.frozen && <p className="text-xs text-muted">Record the result in the Revision Session.</p>}
         </div>
       )}
 
@@ -185,6 +154,7 @@ export const RevisionCard = memo(function RevisionCard({ item, today, showPatter
         <ol className="mt-2 space-y-1 border-l border-line pl-3" aria-label={`Revision history for ${problem.title}`}>
           <li>
             <span className="font-medium">Solved:</span> {formatDate(entry.solvedDate)}
+            {item.solvedDuringPause && <span className="text-muted"> (during a revision pause)</span>}
           </li>
           {history.map((row, i) => (
             <li key={i}>

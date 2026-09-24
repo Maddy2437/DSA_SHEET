@@ -96,12 +96,25 @@ export interface RevisionAttempt {
   revision: number; // which revision (1..5) this attempt was for; a repeat or confirmation attempt reuses the same number
   date: string; // YYYY-MM-DD (local date) the revision was done
   result: RevisionResult;
+  // The date this revision was scheduled for when it was done (earlier than `date` = it was overdue). Optional:
+  // attempts saved before it existed simply do not have it. Only used to tell "nothing was due" days from missed days.
+  scheduled?: string;
+}
+
+// A planned break from revision (midsems, travel, ...). Both dates are inclusive local dates; revision resumes the day
+// after `end`. Every scheduled date is shifted by the length of the pause, so nothing piles up while you are away.
+export interface RevisionPause {
+  start: string;
+  end: string;
 }
 
 export interface RevisionState {
   stage: number; // revisions completed successfully so far (0..5)
   due: string | null; // YYYY-MM-DD the next revision is due; null once the problem is Mastered
   attempts: RevisionAttempt[]; // every revision attempt, oldest first
+  // Set only when the problem was first solved AFTER a revision pause had been activated (so its schedule starts
+  // when the pause ends). Optional: everything saved before it existed simply does not have it.
+  solvedDuringPause?: boolean;
 }
 
 export interface ProblemProgress {
@@ -121,6 +134,7 @@ export type ProgressMap = Record<string, ProblemProgress>;
 
 export interface Settings {
   theme: 'dark' | 'light';
-  dailyTarget: number;
+  dailyTarget: number; // NEW problems to solve per day (Dashboard)
+  revisionTarget: number; // scheduled revisions to complete per day (Revision Hub); independent of dailyTarget
   lastExport: string | null; // YYYY-MM-DD
 }

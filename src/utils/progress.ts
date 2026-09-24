@@ -1,6 +1,6 @@
-import type { ProblemProgress, ProgressMap, RevisionResult, Status } from '../types';
+import type { ProblemProgress, ProgressMap, RevisionPause, RevisionResult, Status } from '../types';
 import { DATE_RE, dayNumber } from './dates';
-import { applyRevision, coerceRevision, newRevisionState } from './revision';
+import { applyRevision, coercePauses, coerceRevision, newRevisionState, shiftRevision } from './revision';
 import { readStorage, removeStorage, STORAGE_KEYS, writeStorage } from './storage';
 
 export const APP_ID = 'madhavs-dsa-sheet';
@@ -41,6 +41,7 @@ export function isDefaultEntry(e: ProblemProgress): boolean {
 function update(map: ProgressMap, id: string, fn: (e: ProblemProgress) => ProblemProgress): ProgressMap {
   const cur = map[id] ?? defaultEntry();
   const next = fn(cur);
+  if (next === cur && id in map) return map; // nothing changed: keep the same map, so callers can tell
   if (isDefaultEntry(next)) {
     if (!(id in map)) return map;
     const copy = { ...map };
@@ -52,15 +53,17 @@ function update(map: ProgressMap, id: string, fn: (e: ProblemProgress) => Proble
 
 export const ops = {
   // solvedDate is set the first time a problem becomes Solved and is never erased afterwards.
-  // That same first solve is what puts the problem into the Revision Hub schedule (revision 1 is due tomorrow).
-  setStatus: (map: ProgressMap, id: string, status: Status, today: string) =>
+  // That same first solve is what puts the problem into the Revision Hub schedule (revision 1 is due the day after
+  // `anchor`). `anchor` is `today` normally, or the resume date when the problem is solved during a pause.
+  setStatus: (map: ProgressMap, id: string, status: Status, today: string, anchor: string = today) =>
     update(map, id, (e) => {
       const firstSolve = status === 'solved' && !e.solvedDate;
       return {
         ...e,
         status,
         solvedDate: firstSolve ? today : e.solvedDate,
-        ...(firstSolve && !e.revision ? { revision: newRevisionState(today) } : {}),
+        // anchor !== today only while revision is paused: this solve happened after the pause was activated.
+        ...(firstSolve && !e.revision ? { revision: newRevisionState(anchor, anchor !== today) } : {}),
       };
     }),
   toggleImportant: (map: ProgressMap, id: string) => update(map, id, (e) => ({ ...e, important: !e.important })),
@@ -79,9 +82,9 @@ export const ops = {
   // ----- Revision Hub -----
   // Puts an already-Solved problem that is not in the schedule yet (e.g. solved earlier today, before the hub
   // existed) into it. Problems solved before the hub are never added automatically.
-  enrollRevision: (map: ProgressMap, id: string, today: string) =>
+  enrollRevision: (map: ProgressMap, id: string, today: string, anchor?: string) =>
     update(map, id, (e) =>
-      e.revision || e.status !== 'solved' ? e : { ...e, revision: newRevisionState(e.solvedDate ?? today) },
+      e.revision || e.status !== 'solved' ? e : { ...e, revision: newRevisionState(anchor ?? e.solvedDate ?? today) },
     ),
   // Records how a scheduled revision went. It reuses the existing revisionCount / lastRevised fields (so the rest of
   // the app stays in sync) and never touches status, solvedDate or the manual needsRevision flag.
@@ -92,6 +95,18 @@ export const ops = {
       if (!r || r.due === null || dayNumber(r.due) > dayNumber(today)) return e;
       return { ...e, revision: applyRevision(r, result, today), revisionCount: e.revisionCount + 1, lastRevised: today };
     }),
+  // Pause / resume: moves the due date of every revision that is due on or after `from` by `days` (see startPause /
+  // endPause in revision.ts). Revisions that are already overdue, mastered ones and entries with no schedule are not
+  // touched, and neither are attempts, stages or anything else about an entry.
+  shiftRevisions: (map: ProgressMap, days: number, from: string): ProgressMap => {
+    if (days === 0) return map;
+    const out: ProgressMap = {};
+    for (const [id, e] of Object.entries(map)) {
+      const r = e.revision ? shiftRevision(e.revision, days, from) : undefined;
+      out[id] = r && r !== e.revision ? { ...e, revision: r } : e;
+    }
+    return out;
+  },
 };
 
 // ---------- Persistence ----------
@@ -119,27 +134,40 @@ function coerceEntry(x: unknown): ProblemProgress {
   };
 }
 
-export function loadProgress(): ProgressMap {
+export interface Store {
+  progress: ProgressMap;
+  pauses: RevisionPause[];
+}
+
+// Progress and revision pauses live in ONE document, so a pause and the schedule shift it causes are saved together.
+export function loadStore(): Store {
   const raw = readStorage(STORAGE_KEYS.progress);
-  if (raw === null) return {};
+  if (raw === null) return { progress: {}, pauses: [] };
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!isRecord(parsed) || !isRecord(parsed.entries)) throw new Error('bad shape');
-    const out: ProgressMap = {};
+    const progress: ProgressMap = {};
     for (const [id, entry] of Object.entries(parsed.entries)) {
       const e = coerceEntry(entry);
-      if (!isDefaultEntry(e)) out[id] = e;
+      if (!isDefaultEntry(e)) progress[id] = e;
     }
-    return out;
+    // Older saves have no `pauses`.
+    return { progress, pauses: coercePauses(parsed.pauses) };
   } catch {
     // Never silently lose data: keep the unreadable value under a backup key, then start empty.
     writeStorage(STORAGE_KEYS.corruptBackup, raw);
-    return {};
+    return { progress: {}, pauses: [] };
   }
 }
 
-export function saveProgress(map: ProgressMap): void {
-  writeStorage(STORAGE_KEYS.progress, JSON.stringify({ version: PROGRESS_VERSION, entries: map }));
+export const loadProgress = (): ProgressMap => loadStore().progress;
+
+export function saveProgress(map: ProgressMap, pauses: RevisionPause[] = []): void {
+  // `pauses` is only written once there is one, so a save that never used pauses keeps the old format.
+  writeStorage(
+    STORAGE_KEYS.progress,
+    JSON.stringify({ version: PROGRESS_VERSION, entries: map, ...(pauses.length ? { pauses } : {}) }),
+  );
 }
 
 export function clearProgressStorage(): void {
@@ -153,12 +181,14 @@ export interface ProgressExport {
   exportedAt: string;
   dataset: { checksum: string; problemCount: number };
   progress: ProgressMap;
+  pauses?: RevisionPause[]; // only present once a revision pause has been used
 }
 
 export function buildExport(
   progress: ProgressMap,
   ds: { checksum: string; problemCount: number },
   now: Date = new Date(),
+  pauses: RevisionPause[] = [],
 ): ProgressExport {
   return {
     app: APP_ID,
@@ -166,11 +196,12 @@ export function buildExport(
     exportedAt: now.toISOString(),
     dataset: { checksum: ds.checksum, problemCount: ds.problemCount },
     progress,
+    ...(pauses.length ? { pauses } : {}),
   };
 }
 
 export type ImportResult =
-  | { ok: true; progress: ProgressMap; exportedAt: string | null; checksum: string | null }
+  | { ok: true; progress: ProgressMap; pauses: RevisionPause[]; exportedAt: string | null; checksum: string | null }
   | { ok: false; error: string };
 
 // Strict: an import is validated in full before anything is replaced.
@@ -212,10 +243,18 @@ export function parseImport(text: string): ImportResult {
     const entry = coerceEntry(e);
     if (!isDefaultEntry(entry)) progress[id] = entry;
   }
+  // Optional: exports made before revision pauses existed have none.
+  let pauses: RevisionPause[] = [];
+  if (data.pauses != null) {
+    pauses = coercePauses(data.pauses);
+    if (!Array.isArray(data.pauses) || pauses.length !== data.pauses.length)
+      return { ok: false, error: 'The export has invalid revision pause data.' };
+  }
   const ds = isRecord(data.dataset) ? data.dataset : {};
   return {
     ok: true,
     progress,
+    pauses,
     exportedAt: typeof data.exportedAt === 'string' ? data.exportedAt : null,
     checksum: typeof ds.checksum === 'string' ? ds.checksum : null,
   };

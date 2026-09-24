@@ -1,7 +1,7 @@
 import { Download, Moon, Sun, Trash2, Upload } from 'lucide-react';
 import { useState } from 'react';
 import { TargetPicker } from '../components/TargetPicker';
-import { useProgress, useProgressActions } from '../hooks/useProgress';
+import { usePauses, useProgress, useProgressActions } from '../hooks/useProgress';
 import { useSettings } from '../hooks/useSettings';
 import { dataset, datasetChecksum } from '../utils/dataset';
 import { formatDate, todayKey } from '../utils/dates';
@@ -15,6 +15,7 @@ const btn = 'inline-flex items-center gap-2 rounded-md border border-line px-3 p
 export default function Settings() {
   const { settings, update } = useSettings();
   const progress = useProgress();
+  const pauses = usePauses();
   const actions = useProgressActions();
   const [pending, setPending] = useState<Pending | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +25,7 @@ export default function Settings() {
   const orphaned = Object.keys(progress).filter((id) => !dataset.byId.has(id)).length;
 
   const onExport = () => {
-    const data = buildExport(progress, { checksum: datasetChecksum(), problemCount: dataset.problems.length });
+    const data = buildExport(progress, { checksum: datasetChecksum(), problemCount: dataset.problems.length }, new Date(), pauses);
     const today = todayKey();
     downloadJson(`madhavs-dsa-progress-${today}.json`, data);
     update({ lastExport: today });
@@ -49,7 +50,7 @@ export default function Settings() {
 
   const applyImport = () => {
     if (!pending) return;
-    actions.replaceAll(pending.progress);
+    actions.replaceAll(pending.progress, pending.pauses);
     setNotice(`Imported ${Object.keys(pending.progress).length} entries. Your previous progress was replaced.`);
     setPending(null);
   };
@@ -80,8 +81,17 @@ export default function Settings() {
 
       <section aria-labelledby="target-h" className="rounded-xl border border-line bg-surface p-4">
         <h2 id="target-h" className="text-sm font-semibold">Daily target</h2>
-        <p className="mb-3 mt-1 text-sm text-muted">Problems to solve per day.</p>
+        <p className="mb-3 mt-1 text-sm text-muted">New problems to solve per day.</p>
         <TargetPicker />
+      </section>
+
+      <section aria-labelledby="revision-target-h" className="rounded-xl border border-line bg-surface p-4">
+        <h2 id="revision-target-h" className="text-sm font-semibold">Daily revision target</h2>
+        <p className="mb-3 mt-1 text-sm text-muted">
+          Scheduled revisions to complete per day in the Revision Hub. It is separate from the problem target above and
+          never replaces what is actually due.
+        </p>
+        <TargetPicker field="revisionTarget" />
       </section>
 
       <section aria-labelledby="backup-h" className="rounded-xl border border-line bg-surface p-4">
@@ -112,7 +122,10 @@ export default function Settings() {
           <div role="group" aria-label="Confirm import" className="mt-3 rounded-lg border border-accent/50 bg-accent-soft p-3 text-sm">
             <p>
               This file has <strong>{Object.keys(pending.progress).length}</strong> entries ({pendingSolved} solved), exported {pending.exportedAt ? formatDate(pending.exportedAt.slice(0, 10)) : 'at an unknown date'}.
-              Importing <strong>replaces</strong> your current progress.
+              Importing <strong>replaces</strong> your current progress, including all revision history, schedules and
+              pauses, with what is in this file{pending.pauses.length > 0 ? ` (${pending.pauses.length === 1 ? '1 revision pause' : `${pending.pauses.length} revision pauses`})` : ' (no revision pauses)'}.
+              A file exported before revision pauses existed clears any pause you have now. Your settings (theme and
+              targets) are not part of a backup and stay as they are.
             </p>
             {pending.checksum && pending.checksum !== datasetChecksum() && (
               <p className="mt-1 text-amber-700 dark:text-amber-300">
