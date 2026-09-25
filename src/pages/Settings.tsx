@@ -1,8 +1,10 @@
-import { Download, Moon, Sun, Trash2, Upload } from 'lucide-react';
+import { Download, LogOut, Moon, Sun, Trash2, Upload } from 'lucide-react';
 import { useState } from 'react';
 import { TargetPicker } from '../components/TargetPicker';
+import { useAuth } from '../hooks/useAuth';
 import { usePauses, useProgress, useProgressActions } from '../hooks/useProgress';
 import { useSettings } from '../hooks/useSettings';
+import { displayNameOf } from '../utils/auth';
 import { dataset, datasetChecksum } from '../utils/dataset';
 import { formatDate, todayKey } from '../utils/dates';
 import { downloadJson, readFileText } from '../utils/download';
@@ -13,6 +15,9 @@ type Pending = Extract<ImportResult, { ok: true }>;
 const btn = 'inline-flex items-center gap-2 rounded-md border border-line px-3 py-1.5 text-sm font-medium hover:bg-surface2';
 
 export default function Settings() {
+  const auth = useAuth();
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   const { settings, update } = useSettings();
   const progress = useProgress();
   const pauses = usePauses();
@@ -66,6 +71,38 @@ export default function Settings() {
   return (
     <div className="max-w-2xl space-y-5">
       <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
+
+      {auth.user && (
+        <section aria-labelledby="account-h" className="rounded-xl border border-line bg-surface p-4">
+          <h2 id="account-h" className="text-sm font-semibold">Account</h2>
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 text-sm">
+              <p className="truncate font-medium" data-testid="account-name">{displayNameOf(auth.user)}</p>
+              <p className="truncate text-muted" data-testid="account-email">{auth.user.email}</p>
+            </div>
+            <button
+              type="button"
+              disabled={loggingOut}
+              onClick={async () => {
+                setLoggingOut(true);
+                setLogoutError(null);
+                const result = await auth.signOut();
+                if (!result.ok) setLogoutError(result.message);
+                setLoggingOut(false);
+              }}
+              className={`${btn} disabled:opacity-60`}
+            >
+              <LogOut aria-hidden className="size-4" /> {loggingOut ? 'Logging out…' : 'Log out'}
+            </button>
+          </div>
+          {logoutError && <p role="alert" className="mt-2 text-sm text-rose-600 dark:text-rose-300">{logoutError}</p>}
+          <p className="mt-3 rounded-lg border border-line bg-bg p-3 text-xs text-muted" data-testid="shared-browser-notice">
+            <strong className="text-fg">Your progress is saved in this browser, not in your account.</strong> Logging in only unlocks the app. Anyone who
+            logs in on this browser sees the same progress, and logging out does not remove it. Use a separate browser profile for each
+            person until per-account storage arrives. Export a backup below before you clear your browser data.
+          </p>
+        </section>
+      )}
 
       <section aria-labelledby="theme-h" className="rounded-xl border border-line bg-surface p-4">
         <h2 id="theme-h" className="text-sm font-semibold">Theme</h2>
